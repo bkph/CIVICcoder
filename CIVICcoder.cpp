@@ -23,7 +23,7 @@
 	"There is no express or implied warranty, including merchantability or fitness" \
 	"for a particular purpose." 
 
-#define  VERSION   "Version 0.8"
+#define  VERSION   "Version 0.8.1"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -118,6 +118,8 @@ int mapmemetype = 0;				// map meme --- default URL_DEFINED or given on command 
 char const ** CA = NULL;			// array of strings for civic location address values given on command line
 
 char const *country_code="US";		// (default) civic location country - given on command line using -country=...
+
+// See: ISO 3166-1 alpha-2 see https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2
 
 /////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -321,7 +323,7 @@ char *CA_type_string(int k) {
 		case STREET_NAME_POST_MODIFIER: return "STREET_NAME_POST_MODIFIER";
 		case SCRIPT: return "SCRIPT";
 		case RESERVED: return "RESERVED";
-		default: return "Unknown CA type";
+		default: return NULL;	// "Unknown CA type"
 	}
 }
 
@@ -557,6 +559,8 @@ int commandline(int argc, const char *argv[]) {
 			country_code = grabstring(arg);
 		else if (strcmp(arg, "-?") == 0) showusage();
 		else if (strcmp(arg, "-help") == 0) showusage();
+		else if (strcmp(arg, "-version") == 0) printf("%s %s\n", "CIVICcoder", version);
+		else if (strcmp(arg, "-copyright") == 0) printf("%s %s\n", "CIVICcoder", copyright);
 		else { //	try keys for civic string
 			const char *argequ = strchr(arg+1, '=');
 			if (debugflag) printf("arg+1 %s (argequ+1 %s)\n", arg+1, argequ+1);
@@ -582,7 +586,7 @@ void showCivicValues () {
 	printf("Location Civic Keys and Values:\n");
 	for (int k = 0; k <= MAX_CA_TYPE; k++) {
 		if (CA[k] == NULL) continue;
-		printf("%3d\t%s\t(%s)\n", k, CA[k], CA_type_string(k));
+		printf("%3d\t\"%s\"\t(%s)\n", k, CA[k], CA_type_string(k));
 	}
 }
 
@@ -669,13 +673,14 @@ void decodeCivicString(const char *str) {
 	int b = getoctet(str, nbyt++);	// 00 MEASURE_REQUEST_MODE
 	int c = getoctet(str, nbyt++);	// 0B (LOCATION_CIVIC_TYPE) (Measurement Type Table 9-107)
 	if (a != MEASURE_TOKEN || b != MEASURE_REQUEST_MODE || c != LOCATION_CIVIC_TYPE)
-		printf("ERROR: Bad Measurement Element Type %0x %0x %0x\n", a, b, c);
+		printf("ERROR: Bad Measurement Element Type %02X %02X %02X\n", a, b, c);
 	while (nbyt < slen && str[nbyt] != '\0') {
 		int ID = getoctet(str, nbyt++);		// ID 
 		int nlen = getoctet(str, nbyt++);	// length
 		if (traceflag) printf("ID %d nlen %d nbyt %d slen %d\n", ID, nlen, nbyt, slen);
 		if (nbyt + nlen > slen) {	// don't try and parse past end of string
-			printf("ERROR: bad length code ID %d nlen %d (nbyt %d slen %d)\n", ID, nlen, nbyt, slen);
+			printf("ERROR: bad length code ID %d (0x%02X) nlen %d (0x%02X) at nbyt %d slen %d\n", 
+				   ID, ID, nlen, nlen, nbyt-1, slen);
 			break;
 		}
 		switch(ID) {
@@ -687,20 +692,26 @@ void decodeCivicString(const char *str) {
 					  (country_code[0] < 'a' || country_code[0] > 'z')) {
 					printf("ERROR: bad country code %s\n", country_code);
 				}
-				else printf("\t%s\t(COUNTRY CODE)\n", country_code);
+				else printf("\t\"%s\"\t(COUNTRY CODE)\n", country_code);
 				while (nbyt < nlen && str[nbyt] != '\0') {
 					if (traceflag) printf("nbyt %d nlen %d str[nbyt] %d\n", nbyt, nlen, str[nbyt]);
 					ID = getoctet(str, nbyt++);		// subelement ID
 					int olen = getoctet(str, nbyt++);	// subelement field length
 					if (nbyt + olen > slen) {
-						printf("ERROR: bad length code ID %d olen %d (nbyt %d slen %d)\n", ID, olen, nbyt, slen);
+						printf("ERROR: bad length code ID %d (0x%02X) olen %d (0x%02X) at nbyt %d slen %d\n",
+							   ID, ID, olen, olen, nbyt-1, slen);
 						nbyt = slen;	// force exit of outer while loop
 						break;
 					}
 					char *text = gethexstring(str, nbyt, olen);
 					nbyt += olen;
 					if (traceflag) printf("%d\t%s\n", ID, text);
-					if (ID >= 0 && ID <= MAX_CA_TYPE) CA[ID] = text;
+					if (ID >= 0 && ID <= MAX_CA_TYPE) {
+						CA[ID] = text;
+						if (CA_type_string(ID) == NULL)
+							printf("WARNING: unknown CA type ID %d (0x%02X) olen %d (0x%02X) at nbyt %d\n",
+								   ID, ID, olen, olen, nbyt-olen-2);
+					}
 				}
 				showCivicValues();
 				break;
